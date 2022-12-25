@@ -1,0 +1,21 @@
+HKCR
+{
+    NoRemove CLSID
+    {
+        ForceRemove {DF4F5AE4-E597-4C12-BC26-2776C27F71AE} = s 'NDSIconShlExt Class'
+        {
+            InprocServer32 = s '%MODULE%'
+            {
+                val ThreadingModel = s 'Apartment'
+            }
+        }
+    }
+    NoRemove .nds
+    {
+        NoRemove DefaultIcon = s '%%1'
+        NoRemove ShellEx
+        {
+            ForceRemove IconHandler = s '{DF4F5AE4-E597-4C12-BC26-2776C27F71AE}'
+        }
+    }
+}

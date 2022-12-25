@@ -1,0 +1,38 @@
+// NDSFileIcons.idl : IDL source for NDSFileIcons.dll
+//
+
+// This file will be processed by the MIDL tool to
+// produce the type library (NDSFileIcons.tlb) and marshalling code.
+
+import "oaidl.idl";
+import "ocidl.idl";
+	[
+		object,
+		uuid(854AC32B-9A35-4494-A9B4-B62781F5F4D3),
+		dual,
+		helpstring("INDSIconShlExt Interface"),
+		pointer_default(unique)
+	]
+	interface INDSIconShlExt : IDispatch
+	{
+	};
+
+[
+	uuid(B8C2F66E-EDB8-4765-8A47-BB6DC9B28891),
+	version(1.0),
+	helpstring("NDSFileIcons 1.0 Type Library")
+]
+library NDSFILEICONSLib
+{
+	importlib("stdole32.tlb");
+	importlib("stdole2.tlb");
+
+	[
+		uuid(DF4F5AE4-E597-4C12-BC26-2776C27F71AE),
+		helpstring("NDSIconShlExt Class")
+	]
+	coclass NDSIconShlExt
+	{
+		[default] interface INDSIconShlExt;
+	};
+};
