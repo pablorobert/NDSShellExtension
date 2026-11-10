@@ -1,4 +1,4 @@
-; TxtFileIcons.def : Declares the module parameters.
+; NDSFileIcons.def : Declares the module parameters.
 
 LIBRARY      "NDSFileIcons.DLL"
 

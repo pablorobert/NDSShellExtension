@@ -70,7 +70,7 @@ BEGIN
         BEGIN
             VALUE "FileDescription", "NDSFileIcons Module"
             VALUE "FileVersion", "1, 0, 0, 1"
-            VALUE "InternalName", "TxtFileIcons"
+            VALUE "InternalName", "NDSFileIcons"
             VALUE "LegalCopyright", "Copyright 2011"
             VALUE "OriginalFilename", "NDSFileIcons.DLL"
             VALUE "ProductName", "NDSFileIcons Module"
@@ -89,7 +89,7 @@ END
 // REGISTRY
 //
 
-IDR_TXTICONSHLEXT       REGISTRY                "res\\NDSIconShlExt.rgs"
+IDR_NDSICONSHLEXT       REGISTRY                "res\\NDSIconShlExt.rgs"
 
 /////////////////////////////////////////////////////////////////////////////
 //

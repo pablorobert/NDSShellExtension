@@ -4,7 +4,7 @@
 #define __NDSICONSHLEXT_H_
 
 /////////////////////////////////////////////////////////////////////////////
-// CTxtIconShlExt
+// CNDSIconShlExt
 
 class ATL_NO_VTABLE CNDSIconShlExt :
     public CComObjectRootEx<CComSingleThreadModel>,
@@ -20,7 +20,7 @@ public:
         COM_INTERFACE_ENTRY(IExtractIcon)
     END_COM_MAP()
 
-    DECLARE_REGISTRY_RESOURCEID(IDR_TXTICONSHLEXT)
+    DECLARE_REGISTRY_RESOURCEID(IDR_NDSICONSHLEXT)
 
 public:
     // IPersistFile

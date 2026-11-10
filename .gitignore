@@ -69,6 +69,8 @@ ScaffoldingReadMe.txt
 StyleCopReport.xml
 
 # Files built by Visual Studio
+# MIDL output of NDSFileIcons.idl (regenerated on every build)
+NDSFileIcons.h
 *_i.c
 *_p.c
 *_h.h

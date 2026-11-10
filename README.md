@@ -19,7 +19,8 @@ Open `NDSFileIcons.sln` and build `Release | x64`, or from a command line:
 msbuild NDSFileIcons.sln /p:Configuration=Release /p:Platform=x64
 ```
 
-Output: `x64\ReleaseU\NDSFileIcons.dll`.
+Output: `x64\Release\NDSFileIcons.dll`. A `Win32` build is also available
+(only useful on 32-bit Windows 10).
 
 ## Install
 

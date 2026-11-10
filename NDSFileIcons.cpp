@@ -1,10 +1,5 @@
 // NDSFileIcons.cpp : Implementation of DLL Exports.
 
-
-// Note: Proxy/Stub Information
-//      To build a separate proxy/stub DLL,
-//      run nmake -f TxtFileIconsps.mk in the project directory.
-
 #include "stdafx.h"
 #include "resource.h"
 #include <initguid.h>

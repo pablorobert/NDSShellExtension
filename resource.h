@@ -3,7 +3,7 @@
 // Used by NDSFileIcons.rc
 //
 #define IDS_PROJNAME                    100
-#define IDR_TXTICONSHLEXT               101
+#define IDR_NDSICONSHLEXT               101
 #define IDI_NDS                         102
 
 // Next default values for new objects
