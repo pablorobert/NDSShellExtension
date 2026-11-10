@@ -132,16 +132,46 @@ static bool ReadString ( HKEY root, LPCTSTR sub, LPCTSTR name, TCHAR* out, DWORD
         && 0 != out[0];
 }
 
+// ProgID que pode ser ligado ao handler.
+//  - "Applications\x.exe" (gerado por "Abrir com -> Sempre") e "AppX..."
+//    (apps UWP) valem para varias extensoes ao mesmo tempo; ligar o handler
+//    neles afetaria .gba, .zip etc.
+//  - Por maquina, um ProgID que existe em HKCU\Software\Classes seria
+//    sombreado pela copia do HKCU (o DefaultIcon dela vence); esse caso e do
+//    registro por usuario.
+static bool IsBindableProgId ( LPCTSTR progId, bool perUser )
+{
+    if ( 0 == _tcsnicmp ( progId, _T("Applications\\"), 13 )
+         || 0 == _tcsnicmp ( progId, _T("AppX"), 4 ) )
+        return false;
+
+    if ( !perUser )
+        {
+        TCHAR sub[MAX_PATH + 32];
+        HKEY  h;
+        _stprintf_s ( sub, _T("Software\\Classes\\%s"), progId );
+        if ( ERROR_SUCCESS == RegOpenKeyEx ( HKEY_CURRENT_USER, sub, 0, KEY_QUERY_VALUE, &h ) )
+            {
+            RegCloseKey ( h );
+            return false;
+            }
+        }
+
+    return true;
+}
+
 // Quem e dono do .nds agora. Precisa rodar ANTES do redirecionamento,
 // para enxergar a visao mesclada (HKLM + HKCU) do HKCR.
-static void DiscoverBindings ( CBindings& b )
+static void DiscoverBindings ( CBindings& b, bool perUser )
 {
     TCHAR progId[MAX_PATH];
 
     b.Add ( _T(".nds") );
-    if ( ReadString ( HKEY_CLASSES_ROOT, _T(".nds"), NULL, progId, MAX_PATH ) )
+    if ( ReadString ( HKEY_CLASSES_ROOT, _T(".nds"), NULL, progId, MAX_PATH )
+         && IsBindableProgId ( progId, perUser ) )
         b.Add ( progId );
-    if ( ReadString ( HKEY_CURRENT_USER, USERCHOICE_KEY, _T("ProgId"), progId, MAX_PATH ) )
+    if ( ReadString ( HKEY_CURRENT_USER, USERCHOICE_KEY, _T("ProgId"), progId, MAX_PATH )
+         && IsBindableProgId ( progId, perUser ) )
         b.Add ( progId );
 }
 
@@ -289,7 +319,7 @@ static void ReadRecordedBindings ( CBindings& b )
 static HRESULT RegisterImpl ( bool perUser )
 {
     CBindings bindings;
-    DiscoverBindings ( bindings );
+    DiscoverBindings ( bindings, perUser );
 
     if ( !perUser )
         {
@@ -307,6 +337,11 @@ static HRESULT RegisterImpl ( bool perUser )
     if ( ERROR_SUCCESS != redirect.Result() )
         return HRESULT_FROM_WIN32 ( redirect.Result() );
 
+    // Mantem os ProgIDs de registros anteriores: o ForceRemove do .rgs
+    // apaga CLSID\{...}\Bindings, e sem isso um dono antigo do .nds
+    // ficaria com o handler pendurado depois do unregister.
+    ReadRecordedBindings ( bindings );
+
     HRESULT hr = _Module.RegisterServer ( FALSE );
     if ( FAILED(hr) )
         return hr;
@@ -315,7 +350,15 @@ static HRESULT RegisterImpl ( bool perUser )
         {
         LONG r = Bind ( bindings.path[i] );
         if ( ERROR_SUCCESS != r )
+            {
+            // Desfaz tudo para nao deixar registro pela metade. Inclui os
+            // bindings de registros anteriores: sem o CLSID eles ficariam
+            // apontando para um handler inexistente.
+            for ( int j = 0; j < bindings.count; j++ )
+                Unbind ( bindings.path[j] );
+            _Module.UnregisterServer ( FALSE );
             return HRESULT_FROM_WIN32 ( r );
+            }
         }
 
     return S_OK;

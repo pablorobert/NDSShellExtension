@@ -13,7 +13,7 @@ class ATL_NO_VTABLE CNDSIconShlExt :
     public IExtractIcon
 {
 public:
-    CNDSIconShlExt() { m_szFilename[0] = _T('\0'); }
+    CNDSIconShlExt() : m_haveIcon(false) { m_szFilename[0] = _T('\0'); }
 
     BEGIN_COM_MAP(CNDSIconShlExt)
         COM_INTERFACE_ENTRY(IPersistFile)
@@ -34,6 +34,7 @@ public:
     { 
 		USES_CONVERSION;
 		lstrcpyn ( m_szFilename, W2CT(wszFile), MAX_PATH );
+		m_haveIcon = false;
 		return S_OK;
     }
 
@@ -45,8 +46,11 @@ public:
 
 protected:
     TCHAR     m_szFilename[MAX_PATH];   // Full path to the file in question.
+    DWORD     m_pixels[32 * 32];        // Icone decodificado (ARGB, top-down).
+    bool      m_haveIcon;               // m_pixels valido para m_szFilename.
 
     bool readNDSIcon( DWORD* pixels );
+    bool getFallbackIcon( LPTSTR szIconFile, UINT cchMax, int* piIndex );
 };
 
 #endif //__NDSICONSHLEXT_H_

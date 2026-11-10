@@ -7,14 +7,21 @@
 
 #include <stdio.h>
 #include <tchar.h>
+#include <shlwapi.h>
+
+#pragma comment(lib, "shlwapi.lib")
 
 // Banner da ROM (ver GBATEK, "DS Cartridge Icon/Title"):
 //   header+0x68 : offset do banner (0 = sem banner)
+//   banner+0x00 : versao (0x0001, 0x0002, 0x0003 ou 0x0103)
 //   banner+0x20 : bitmap 32x32 4bpp, 4x4 tiles de 8x8 (512 bytes)
 //   banner+0x220: paleta, 16 cores BGR555 (32 bytes); cor 0 = transparente
-static const long BANNER_PTR_OFFSET   = 0x68;
-static const long BANNER_ICON_OFFSET  = 0x20;
-static const int  NDS_ICON_SIZE       = 32;
+//   banner v1 tem 0x840 bytes (as versoes seguintes sao maiores)
+static const long    BANNER_PTR_OFFSET  = 0x68;
+static const long    BANNER_ICON_OFFSET = 0x20;
+static const __int64 HEADER_SIZE        = 0x200;
+static const __int64 BANNER_V1_SIZE     = 0x840;
+static const int     NDS_ICON_SIZE      = 32;
 
 static HICON createIcon ( const DWORD* pixels, int size );
 
@@ -25,57 +32,94 @@ STDMETHODIMP CNDSIconShlExt::GetIconLocation (
     UINT uFlags,  LPTSTR szIconFile, UINT cchMax,
     int* piIndex, UINT* pwFlags )
 {
-    if ( GetFileAttributes ( m_szFilename ) == INVALID_FILE_ATTRIBUTES )
-        return S_FALSE;                 // tell the shell to use a default icon
-
     // Nao deixar lixo nos parametros de saida.
     if ( NULL != szIconFile && cchMax > 0 )
         szIconFile[0] = _T('\0');
     if ( NULL != piIndex )
         *piIndex = 0;
+    *pwFlags = 0;
 
-    // Icone gerado por arquivo: sem nome/indice e sem cache.
-    *pwFlags = GIL_NOTFILENAME | GIL_DONTCACHE;
+    // Le o arquivo uma vez so; o Extract usa o resultado guardado.
+    m_haveIcon = readNDSIcon ( m_pixels );
 
-    return S_OK;
+    if ( m_haveIcon )
+        {
+        // Icone gerado por arquivo: sem nome/indice e sem cache.
+        *pwFlags = GIL_NOTFILENAME | GIL_DONTCACHE;
+        return S_OK;
+        }
+
+    // Nao e uma ROM valida (ou o ProgID e compartilhado com outra extensao):
+    // devolve o icone que o ProgID tinha antes do registro, para o shell
+    // extrair ele mesmo. Sem backup, S_FALSE = icone padrao.
+    if ( NULL != szIconFile && NULL != piIndex
+         && getFallbackIcon ( szIconFile, cchMax, piIndex ) )
+        return S_OK;
+
+    return S_FALSE;
 }
 
 STDMETHODIMP CNDSIconShlExt::Extract (
     LPCTSTR pszFile, UINT nIconIndex, HICON* phiconLarge, HICON* phiconSmall,
     UINT nIconSize )
 {
-int   largeSize = LOWORD(nIconSize), smallSize = HIWORD(nIconSize);
-DWORD pixels[NDS_ICON_SIZE * NDS_ICON_SIZE];
+int largeSize = LOWORD(nIconSize), smallSize = HIWORD(nIconSize);
 
     if ( NULL != phiconLarge ) *phiconLarge = NULL;
     if ( NULL != phiconSmall ) *phiconSmall = NULL;
 
+    // Sem icone proprio (fallback ou erro): o shell extrai pela localizacao.
+    if ( !m_haveIcon )
+        return S_FALSE;
+
     if ( 0 == largeSize ) largeSize = GetSystemMetrics ( SM_CXICON );
     if ( 0 == smallSize ) smallSize = GetSystemMetrics ( SM_CXSMICON );
 
-    // Le o arquivo uma vez so; em qualquer falha o shell usa o icone padrao.
-    if ( !readNDSIcon ( pixels ) )
-        return S_FALSE;
-
     if ( NULL != phiconLarge )
         {
-        *phiconLarge = createIcon ( pixels, largeSize );
+        *phiconLarge = createIcon ( m_pixels, largeSize );
         if ( NULL == *phiconLarge )
             return S_FALSE;
         }
 
     if ( NULL != phiconSmall )
-        *phiconSmall = createIcon ( pixels, smallSize );
+        *phiconSmall = createIcon ( m_pixels, smallSize );
 
     return S_OK;
 }
 
+// Icone original do ProgID associado a extensao do arquivo, guardado em
+// DefaultIcon\OldDefIcon pelo registro. Formato "arquivo,indice".
+bool CNDSIconShlExt::getFallbackIcon ( LPTSTR szIconFile, UINT cchMax, int* piIndex )
+{
+    HKEY hk = NULL;
+    if ( FAILED ( AssocQueryKey ( ASSOCF_NONE, ASSOCKEY_CLASS,
+                                  PathFindExtension ( m_szFilename ), NULL, &hk ) ) )
+        return false;
+
+    TCHAR loc[MAX_PATH];
+    DWORD cb = sizeof(loc);
+    LONG  r  = RegGetValue ( hk, _T("DefaultIcon"), _T("OldDefIcon"),
+                             RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ, NULL, loc, &cb );
+    RegCloseKey ( hk );
+
+    if ( ERROR_SUCCESS != r || 0 == loc[0] || 0 == lstrcmpi ( loc, _T("%1") ) )
+        return false;
+
+    *piIndex = PathParseIconLocation ( loc );
+    lstrcpyn ( szIconFile, loc, cchMax );
+    return 0 != szIconFile[0];
+}
+
 // Le o icone do banner da ROM e decodifica para 32x32 ARGB (top-down)
-// em 'pixels'. Retorna false se o arquivo nao abrir ou nao tiver banner.
+// em 'pixels'. Retorna false se o arquivo nao abrir ou nao for uma ROM com
+// banner valido (protege contra arquivos de outro tipo que usem o mesmo
+// ProgID).
 bool CNDSIconShlExt::readNDSIcon ( DWORD* pixels )
 {
 FILE*  fp = NULL;
 UINT   bannerOffset = 0;
+WORD   version = 0;
 BYTE   tiles[NDS_ICON_SIZE * NDS_ICON_SIZE / 2];
 BYTE   palette[32];
 DWORD  colors[16];
@@ -83,11 +127,20 @@ DWORD  colors[16];
     if ( 0 != _tfopen_s ( &fp, m_szFilename, _T("rb") ) || NULL == fp )
         return false;
 
-    bool ok = 0 == fseek ( fp, BANNER_PTR_OFFSET, SEEK_SET )
+    __int64 fileSize = -1;
+    if ( 0 == _fseeki64 ( fp, 0, SEEK_END ) )
+        fileSize = _ftelli64 ( fp );
+
+    bool ok = fileSize >= HEADER_SIZE
+           && 0 == _fseeki64 ( fp, BANNER_PTR_OFFSET, SEEK_SET )
            && 1 == fread ( &bannerOffset, sizeof(bannerOffset), 1, fp )
-           && 0 != bannerOffset
-           && bannerOffset < 0x7fffffffu - BANNER_ICON_OFFSET
-           && 0 == fseek ( fp, (long) bannerOffset + BANNER_ICON_OFFSET, SEEK_SET )
+           && (__int64) bannerOffset >= HEADER_SIZE
+           && (__int64) bannerOffset + BANNER_V1_SIZE <= fileSize
+           && 0 == _fseeki64 ( fp, bannerOffset, SEEK_SET )
+           && 1 == fread ( &version, sizeof(version), 1, fp )
+           && ( 0x0001 == version || 0x0002 == version
+             || 0x0003 == version || 0x0103 == version )
+           && 0 == _fseeki64 ( fp, (__int64) bannerOffset + BANNER_ICON_OFFSET, SEEK_SET )
            && sizeof(tiles)   == fread ( tiles,   1, sizeof(tiles),   fp )
            && sizeof(palette) == fread ( palette, 1, sizeof(palette), fp );
 
@@ -169,8 +222,9 @@ static HICON createIcon ( const DWORD* pixels, int size )
     // Windows usa o alfa, mas se o alfa for todo 0 (icone todo transparente)
     // ele cai para a mascara, entao ela precisa estar certa. Linhas de
     // bitmap monocromatico sao alinhadas em WORD.
-    int   stride   = ((size + 15) / 16) * 2;
-    BYTE* maskBits = new BYTE[stride * size];
+    // Maximo 256x256: 32 bytes por linha * 256 = 8 KB, cabe na pilha.
+    BYTE maskBits[((256 + 15) / 16) * 2 * 256];
+    int  stride = ((size + 15) / 16) * 2;
     ZeroMemory ( maskBits, stride * size );
 
     for ( int y = 0; y < size; y++ )
@@ -179,7 +233,6 @@ static HICON createIcon ( const DWORD* pixels, int size )
                 maskBits[y * stride + x / 8] |= (BYTE) (0x80 >> (x % 8));
 
     HBITMAP mask = CreateBitmap ( size, size, 1, 1, maskBits );
-    delete[] maskBits;
 
     HICON hIcon = NULL;
     if ( NULL != mask )

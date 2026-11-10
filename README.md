@@ -54,7 +54,7 @@ Removes the per-user registration, and the machine-wide one when run elevated.
 
 ## Test file
 
-`ok.nds` is a minimal synthetic ROM (header + banner only). Its icon is a 4x4
+`ok.nds` is a minimal synthetic ROM (header + version 1 banner only). Its icon is a 4x4
 grid of 8x8 tiles: transparent (top-left tile, palette color 0), red (top
 row, 2nd tile), green (2nd row, 2nd tile), blue (bottom-right), everything
 else black.
@@ -68,7 +68,18 @@ else black.
   `HKCU\...\Explorer\FileExts\.nds`), registration also adds the icon handler
   to that ProgID, backing up its `DefaultIcon`; unregister restores it. The
   emulator's "open" association is left alone. If the emulator is installed
-  (or the default app changed) **after** registering, run `regsvr32` again.
+  (or the default app changed) **after** registering, run `regsvr32` again;
+  ProgIDs bound by earlier registrations are kept and also restored on
+  unregister.
+- Shared ProgIDs are skipped: `Applications\<exe>` (created by
+  "Open with -> Always") and `AppX...` (Store apps) cover several extensions
+  at once. In that case the handler stays on `.nds` only, and the app's own
+  icon may win.
+- Files that are not valid ROMs (bad banner version or truncated banner) get
+  the ProgID's original icon back (from the backup), or the default icon.
+- A machine-wide (elevated) registration skips ProgIDs that also exist in
+  `HKCU\Software\Classes`, since the per-user copy would shadow it. Register
+  per user (`regsvr32 /n /i:user ...`) for those.
 - An elevated Explorer ignores per-user (HKCU) registrations.
 
 ## History
