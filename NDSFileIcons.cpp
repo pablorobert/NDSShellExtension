@@ -1,8 +1,8 @@
-// TxtFileIcons.cpp : Implementation of DLL Exports.
+// NDSFileIcons.cpp : Implementation of DLL Exports.
 
 
 // Note: Proxy/Stub Information
-//      To build a separate proxy/stub DLL, 
+//      To build a separate proxy/stub DLL,
 //      run nmake -f TxtFileIconsps.mk in the project directory.
 
 #include "stdafx.h"
@@ -17,6 +17,10 @@ CComModule _Module;
 BEGIN_OBJECT_MAP(ObjectMap)
 OBJECT_ENTRY(CLSID_NDSIconShlExt, CNDSIconShlExt)
 END_OBJECT_MAP()
+
+static const TCHAR APPROVED_KEY[] =
+    _T("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Shell Extensions\\Approved");
+static const TCHAR CLSID_STR[] = _T("{DF4F5AE4-E597-4C12-BC26-2776C27F71AE}");
 
 /////////////////////////////////////////////////////////////////////////////
 // DLL Entry Point
@@ -51,139 +55,179 @@ STDAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID* ppv)
 }
 
 /////////////////////////////////////////////////////////////////////////////
-// DllRegisterServer - Adds entries to the system registry
+// Registro por maquina ou por usuario
+//
+// Por maquina (precisa de admin): HKCR -> HKLM\Software\Classes, mais a
+// lista "Approved" em HKLM.
+// Por usuario (sem admin): HKCR e redirecionado para HKCU\Software\Classes
+// com RegOverridePredefKey, assim o .rgs e o CRegKey escrevem la sem mudar
+// nada. O Explorer (nao elevado) junta HKCU com HKLM e acha a extensao.
 
-STDAPI DllRegisterServer()
+// true se da para escrever em HKLM (processo elevado / admin).
+static bool CanWriteMachine()
 {
-CRegKey key;
-LONG lRet;
+    CRegKey key;
+    return ERROR_SUCCESS == key.Open ( HKEY_LOCAL_MACHINE, APPROVED_KEY, KEY_SET_VALUE );
+}
 
-lRet = key.Create(HKEY_CLASSES_ROOT, _T(".nds"));
+// Redireciona HKCR para HKCU\Software\Classes enquanto o objeto existir.
+class CPerUserClassesRoot
+{
+public:
+    CPerUserClassesRoot() : m_hKey(NULL), m_lRet(ERROR_SUCCESS)
+    {
+        m_lRet = RegCreateKeyEx ( HKEY_CURRENT_USER, _T("Software\\Classes"), 0, NULL, 0,
+                                  KEY_ALL_ACCESS, NULL, &m_hKey, NULL );
+        if ( ERROR_SUCCESS == m_lRet )
+            m_lRet = RegOverridePredefKey ( HKEY_CLASSES_ROOT, m_hKey );
+    }
+    ~CPerUserClassesRoot()
+    {
+        RegOverridePredefKey ( HKEY_CLASSES_ROOT, NULL );
+        if ( NULL != m_hKey )
+            RegCloseKey ( m_hKey );
+    }
+    LONG Result() const { return m_lRet; }
 
-    // On NT/2K, put our extension in the "approved" list.
-    if ( 0 == (GetVersion() & 0x80000000) )
+private:
+    HKEY m_hKey;
+    LONG m_lRet;
+};
+
+// Guarda o DefaultIcon atual de .nds em OldDefIcon (uma vez so) para o
+// unregister poder restaurar.
+static void BackupDefaultIcon()
+{
+    CRegKey key;
+    if ( ERROR_SUCCESS != key.Open ( HKEY_CLASSES_ROOT, _T(".nds\\DefaultIcon"),
+                                     KEY_QUERY_VALUE | KEY_SET_VALUE ) )
+        return;
+
+    BYTE  buf[2 * MAX_PATH * sizeof(TCHAR)];
+    DWORD dwSize = sizeof(buf);
+    DWORD dwType;
+
+    if ( ERROR_SUCCESS == RegQueryValueEx ( key.m_hKey, _T("OldDefIcon"), NULL, NULL, NULL, NULL ) )
+        return;     // ja existe backup
+
+    if ( ERROR_SUCCESS == RegQueryValueEx ( key.m_hKey, NULL, NULL, &dwType, buf, &dwSize ) )
+        RegSetValueEx ( key.m_hKey, _T("OldDefIcon"), 0, dwType, buf, dwSize );
+}
+
+static void RestoreDefaultIcon()
+{
+    CRegKey key;
+    if ( ERROR_SUCCESS != key.Open ( HKEY_CLASSES_ROOT, _T(".nds\\DefaultIcon"),
+                                     KEY_QUERY_VALUE | KEY_SET_VALUE ) )
+        return;
+
+    BYTE  buf[2 * MAX_PATH * sizeof(TCHAR)];
+    DWORD dwSize = sizeof(buf);
+    DWORD dwType;
+
+    if ( ERROR_SUCCESS == RegQueryValueEx ( key.m_hKey, _T("OldDefIcon"), NULL, &dwType, buf, &dwSize ) )
         {
-        lRet = key.Open ( HKEY_LOCAL_MACHINE, 
-                          _T("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Shell Extensions\\Approved"),
-                          KEY_SET_VALUE );
+        RegSetValueEx ( key.m_hKey, NULL, 0, dwType, buf, dwSize );
+        key.DeleteValue ( _T("OldDefIcon") );
+        }
+}
 
-        if ( ERROR_SUCCESS == lRet )
-            {
-            lRet = key.SetValue ( _T("NDS file icon extension"), 
-                                  _T("{DF4F5AE4-E597-4C12-BC26-2776C27F71AE}") );
+static HRESULT RegisterImpl ( bool perUser )
+{
+    if ( perUser )
+        {
+        CPerUserClassesRoot redirect;
+        if ( ERROR_SUCCESS != redirect.Result() )
+            return HRESULT_FROM_WIN32 ( redirect.Result() );
 
-            key.Close();
-            }
-
-        if ( ERROR_SUCCESS != lRet )
-            return HRESULT_FROM_WIN32(lRet);
+        BackupDefaultIcon();
+        return _Module.RegisterServer ( FALSE );
         }
 
-    // Store the current DefaultIcon so we can restore it when we're 
-    // unregistered.  If there already is a backup of the DefaultIcon value,
-    // then do nothing.
-    // **NOTE**  In production code, you should not hardcode HKCR\txtfile
-    // as the key holding info on text files, but instead read the key name
-    // from the default value of HKCR\.txt to make your code robust.  I've
-    // hard-coded "txtfile" here for simplicity.
-    lRet = key.Open ( HKEY_CLASSES_ROOT, _T(".nds\\DefaultIcon"), 
-                      KEY_QUERY_VALUE | KEY_SET_VALUE );
-
+    // "Approved": nome do valor = CLSID, dado = descricao. So tem efeito com
+    // a policy EnforceShellExtensionSecurity, mas e o registro correto.
+    CRegKey key;
+    LONG lRet = key.Open ( HKEY_LOCAL_MACHINE, APPROVED_KEY, KEY_SET_VALUE );
     if ( ERROR_SUCCESS == lRet )
+        lRet = key.SetStringValue ( CLSID_STR, _T("NDS file icon extension") );
+    if ( ERROR_SUCCESS != lRet )
+        return HRESULT_FROM_WIN32 ( lRet );
+    key.Close();
+
+    BackupDefaultIcon();
+    return _Module.RegisterServer ( FALSE );
+}
+
+static HRESULT UnregisterImpl ( bool perUser )
+{
+    if ( perUser )
         {
-        TCHAR szOldDefIcon[2*MAX_PATH];
-        DWORD dwSize = sizeof(szOldDefIcon);
-        DWORD dwType;
+        CPerUserClassesRoot redirect;
+        if ( ERROR_SUCCESS != redirect.Result() )
+            return HRESULT_FROM_WIN32 ( redirect.Result() );
 
-        // Check if there's already a backup of the DefaultIcon value.
-        lRet = key.QueryValue ( szOldDefIcon, _T("OldDefIcon"), &dwSize );
+        RestoreDefaultIcon();
+        return _Module.UnregisterServer ( FALSE );
+        }
 
-        if ( ERROR_SUCCESS != lRet )
-            {
-            // The OldDefIcon backup doesn't exist, so save the current value.
-            //
-            // Note that I'm using the registry APIs directly in order to handle
-            // any value type.  On Win2K the DefaultIcon value is of type
-            // REG_EXPAND_SZ, which CRegKey doesn't handle.  (It only handles
-            // REG_SZ and REG_DWORD.)
-            dwSize = sizeof(szOldDefIcon);
-
-            lRet = RegQueryValueEx ( key.m_hKey, NULL, NULL, &dwType,
-                                     (LPBYTE) szOldDefIcon, &dwSize );
-
-            if ( ERROR_SUCCESS == lRet )
-                {
-                RegSetValueEx ( key.m_hKey, _T("OldDefIcon"), 0, dwType, 
-                                (const BYTE*) szOldDefIcon, dwSize );
-                }
-            }
-
+    CRegKey key;
+    if ( ERROR_SUCCESS == key.Open ( HKEY_LOCAL_MACHINE, APPROVED_KEY, KEY_SET_VALUE ) )
+        {
+        key.DeleteValue ( CLSID_STR );
         key.Close();
         }
 
-    // registers object, typelib and all interfaces in typelib
-    return _Module.RegisterServer(false);
+    RestoreDefaultIcon();
+    return _Module.UnregisterServer ( FALSE );
+}
+
+static void NotifyShell()
+{
+    SHChangeNotify ( SHCNE_ASSOCCHANGED, SHCNF_IDLIST, NULL, NULL );
+}
+
+/////////////////////////////////////////////////////////////////////////////
+// DllRegisterServer - Adds entries to the system registry
+//
+//   regsvr32 NDSFileIcons.dll            -> maquina se for admin, senao usuario
+//   regsvr32 /n /i:user NDSFileIcons.dll -> sempre so para o usuario
+
+STDAPI DllRegisterServer()
+{
+    HRESULT hr = RegisterImpl ( !CanWriteMachine() );
+    if ( SUCCEEDED(hr) )
+        NotifyShell();
+    return hr;
 }
 
 /////////////////////////////////////////////////////////////////////////////
 // DllUnregisterServer - Removes entries from the system registry
+//
+// Remove o registro do usuario sempre e o da maquina quando houver admin.
 
 STDAPI DllUnregisterServer()
 {
-CRegKey key;
-LONG lRet;
+    UnregisterImpl ( true );
 
-    // On NT/2K, remove our extension from the "approved" list.
-    if ( 0 == (GetVersion() & 0x80000000) )
-        {
-        lRet = key.Open ( HKEY_LOCAL_MACHINE, 
-                          _T("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Shell Extensions\\Approved"),
-                          KEY_SET_VALUE );
+    HRESULT hr = S_OK;
+    if ( CanWriteMachine() )
+        hr = UnregisterImpl ( false );
 
-        if ( ERROR_SUCCESS == lRet )
-            {
-            key.DeleteValue ( _T("{DF4F5AE4-E597-4C12-BC26-2776C27F71AE}") );
-            key.Close();
-            }
-        }
+    NotifyShell();
+    return hr;
+}
 
-    // Restore the old DefaultIcon value from the backup we made during
-    // registration.
-    // **NOTE**  In production code, you should not hardcode HKCR\txtfile
-    // as the key holding info on text files, but instead read the key name
-    // from the default value of HKCR\.txt to make your code robust.  I've
-    // hard-coded "txtfile" here for simplicity.
-    lRet = key.Open ( HKEY_CLASSES_ROOT, _T(".nds\\DefaultIcon"), 
-                      KEY_QUERY_VALUE | KEY_SET_VALUE );
+/////////////////////////////////////////////////////////////////////////////
+// DllInstall - regsvr32 /i:user (com ou sem /n)
 
-    if ( ERROR_SUCCESS == lRet )
-        {
-        TCHAR szOldDefIcon[2*MAX_PATH];
-        DWORD dwSize = sizeof(szOldDefIcon);
-        DWORD dwType;
+STDAPI DllInstall ( BOOL bInstall, LPCWSTR pszCmdLine )
+{
+    bool perUser = NULL != pszCmdLine && 0 == _wcsicmp ( pszCmdLine, L"user" );
+    if ( !perUser )
+        perUser = !CanWriteMachine();
 
-        // Check if there's already a backup of the DefaultIcon value.
-        //
-        // Note that I'm using the registry APIs directly in order to handle
-        // any value type.  On Win2K the DefaultIcon value is of type
-        // REG_EXPAND_SZ, which CRegKey doesn't handle.  (It only handles
-        // REG_SZ and REG_DWORD.)
-        lRet = RegQueryValueEx ( key.m_hKey, _T("OldDefIcon"), NULL, &dwType,
-                                 (LPBYTE) szOldDefIcon, &dwSize );
-
-        if ( ERROR_SUCCESS == lRet )
-            {
-            // The OldDefIcon backup exists, so write the contents back to the
-            // default value of the DefaultIcon key...
-            RegSetValueEx ( key.m_hKey, NULL, 0, dwType, 
-                            (const BYTE*) szOldDefIcon, dwSize );
-
-            // ...and get rid of the backup.
-            key.DeleteValue ( _T("OldDefIcon") );
-            }
-
-        key.Close();
-        }
-
-    return _Module.UnregisterServer(false);
+    HRESULT hr = bInstall ? RegisterImpl ( perUser ) : UnregisterImpl ( perUser );
+    if ( SUCCEEDED(hr) )
+        NotifyShell();
+    return hr;
 }

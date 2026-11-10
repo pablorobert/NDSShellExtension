@@ -13,7 +13,7 @@ class ATL_NO_VTABLE CNDSIconShlExt :
     public IExtractIcon
 {
 public:
-    CNDSIconShlExt() : m_qwFileSize(0) { }
+    CNDSIconShlExt() { m_szFilename[0] = _T('\0'); }
 
     BEGIN_COM_MAP(CNDSIconShlExt)
         COM_INTERFACE_ENTRY(IPersistFile)
@@ -45,9 +45,8 @@ public:
 
 protected:
     TCHAR     m_szFilename[MAX_PATH];   // Full path to the file in question.
-    DWORDLONG m_qwFileSize;             // Used by extraction method 2.
 
-	HICON getFromNDSFile();
+    bool readNDSIcon( DWORD* pixels );
 };
 
 #endif //__NDSICONSHLEXT_H_
