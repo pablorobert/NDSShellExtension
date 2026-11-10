@@ -54,8 +54,9 @@ Removes the per-user registration, and the machine-wide one when run elevated.
 ## Test file
 
 `ok.nds` is a minimal synthetic ROM (header + banner only). Its icon is a 4x4
-grid of 8x8 tiles: red (top row, 2nd tile), green (2nd row, 2nd tile), blue
-(bottom-right), transparent first column, everything else black.
+grid of 8x8 tiles: transparent (top-left tile, palette color 0), red (top
+row, 2nd tile), green (2nd row, 2nd tile), blue (bottom-right), everything
+else black.
 
 ## Troubleshooting
 
@@ -63,8 +64,10 @@ grid of 8x8 tiles: red (top row, 2nd tile), green (2nd row, 2nd tile), blue
   `reg query "HKCR\CLSID\{DF4F5AE4-E597-4C12-BC26-2776C27F71AE}\InprocServer32"`.
   If it only exists under `WOW6432Node`, a 32-bit DLL was registered.
 - If an emulator owns `.nds` (a ProgID in `HKCR\.nds` or a `UserChoice` under
-  `HKCU\...\Explorer\FileExts\.nds`), that ProgID's `DefaultIcon` may win over
-  this handler.
+  `HKCU\...\Explorer\FileExts\.nds`), registration also adds the icon handler
+  to that ProgID, backing up its `DefaultIcon`; unregister restores it. The
+  emulator's "open" association is left alone. If the emulator is installed
+  (or the default app changed) **after** registering, run `regsvr32` again.
 - An elevated Explorer ignores per-user (HKCU) registrations.
 
 ## History

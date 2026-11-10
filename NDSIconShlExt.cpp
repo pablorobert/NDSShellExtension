@@ -165,8 +165,21 @@ static HICON createIcon ( const DWORD* pixels, int size )
             bits[y * size + x] = row[x * NDS_ICON_SIZE / size];
         }
 
-    // Com cor 32bpp com alfa, a mascara e ignorada; so precisa existir.
-    HBITMAP mask = CreateBitmap ( size, size, 1, 1, NULL );
+    // Mascara AND coerente com o alfa: bit 1 = transparente. Com 32bpp o
+    // Windows usa o alfa, mas se o alfa for todo 0 (icone todo transparente)
+    // ele cai para a mascara, entao ela precisa estar certa. Linhas de
+    // bitmap monocromatico sao alinhadas em WORD.
+    int   stride   = ((size + 15) / 16) * 2;
+    BYTE* maskBits = new BYTE[stride * size];
+    ZeroMemory ( maskBits, stride * size );
+
+    for ( int y = 0; y < size; y++ )
+        for ( int x = 0; x < size; x++ )
+            if ( 0 == (bits[y * size + x] >> 24) )
+                maskBits[y * stride + x / 8] |= (BYTE) (0x80 >> (x % 8));
+
+    HBITMAP mask = CreateBitmap ( size, size, 1, 1, maskBits );
+    delete[] maskBits;
 
     HICON hIcon = NULL;
     if ( NULL != mask )

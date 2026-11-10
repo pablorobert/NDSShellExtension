@@ -10,12 +10,4 @@ HKCR
             }
         }
     }
-    NoRemove .nds
-    {
-        NoRemove DefaultIcon = s '%%1'
-        NoRemove ShellEx
-        {
-            ForceRemove IconHandler = s '{DF4F5AE4-E597-4C12-BC26-2776C27F71AE}'
-        }
-    }
 }
