@@ -88,23 +88,59 @@ int largeSize = LOWORD(nIconSize), smallSize = HIWORD(nIconSize);
     return S_OK;
 }
 
-// Icone original do ProgID associado a extensao do arquivo, guardado em
-// DefaultIcon\OldDefIcon pelo registro. Formato "arquivo,indice".
+// Le um icone "arquivo,indice" valido (nao vazio e diferente de %1).
+// So RRF_RT_REG_SZ: sem RRF_NOEXPAND, um REG_EXPAND_SZ ja volta expandido
+// como REG_SZ (combinar com RRF_RT_REG_EXPAND_SZ exige RRF_NOEXPAND).
+static bool readIconLocation ( HKEY root, LPCTSTR sub, LPCTSTR name, TCHAR* loc, DWORD cch )
+{
+    DWORD cb = cch * sizeof(TCHAR);
+    loc[0] = 0;
+    return ERROR_SUCCESS == RegGetValue ( root, sub, name, RRF_RT_REG_SZ, NULL, loc, &cb )
+        && 0 != loc[0] && 0 != lstrcmpi ( loc, _T("%1") );
+}
+
+// Icone original do ProgID associado a extensao do arquivo:
+//  1. DefaultIcon\OldDefIcon, o backup gravado pelo registro;
+//  2. sem backup (registro por usuario de um ProgID que so existe em HKLM:
+//     a copia do HKCU nao tem de onde copiar), o DefaultIcon do proprio
+//     HKLM, que continua la, apenas sombreado.
 bool CNDSIconShlExt::getFallbackIcon ( LPTSTR szIconFile, UINT cchMax, int* piIndex )
 {
+    LPCTSTR ext = PathFindExtension ( m_szFilename );
+    TCHAR   loc[MAX_PATH];
+    bool    found = false;
+
     HKEY hk = NULL;
-    if ( FAILED ( AssocQueryKey ( ASSOCF_NONE, ASSOCKEY_CLASS,
-                                  PathFindExtension ( m_szFilename ), NULL, &hk ) ) )
+    if ( SUCCEEDED ( AssocQueryKey ( ASSOCF_NONE, ASSOCKEY_CLASS, ext, NULL, &hk ) ) )
+        {
+        found = readIconLocation ( hk, _T("DefaultIcon"), _T("OldDefIcon"), loc, MAX_PATH );
+        RegCloseKey ( hk );
+        }
+
+    if ( !found )
+        {
+        TCHAR progId[MAX_PATH];
+        DWORD cch = MAX_PATH;
+        // "Unknown" (sem associacao) seria o icone generico de qualquer forma.
+        if ( SUCCEEDED ( AssocQueryString ( ASSOCF_NONE, ASSOCSTR_PROGID, ext, NULL,
+                                            progId, &cch ) )
+             && 0 != lstrcmpi ( progId, _T("Unknown") )
+             && 0 != lstrcmpi ( progId, ext ) )
+            {
+            TCHAR sub[MAX_PATH + 64];
+            _stprintf_s ( sub, _T("Software\\Classes\\%s\\DefaultIcon"), progId );
+            found = readIconLocation ( HKEY_LOCAL_MACHINE, sub, NULL, loc, MAX_PATH );
+            }
+        }
+
+    if ( !found )
         return false;
 
-    TCHAR loc[MAX_PATH];
-    DWORD cb = sizeof(loc);
-    LONG  r  = RegGetValue ( hk, _T("DefaultIcon"), _T("OldDefIcon"),
-                             RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ, NULL, loc, &cb );
-    RegCloseKey ( hk );
-
-    if ( ERROR_SUCCESS != r || 0 == loc[0] || 0 == lstrcmpi ( loc, _T("%1") ) )
-        return false;
+    // Muitos DefaultIcon sao REG_SZ com %SystemRoot% etc.
+    TCHAR expanded[MAX_PATH];
+    if ( 0 != ExpandEnvironmentStrings ( loc, expanded, MAX_PATH )
+         && lstrlen ( expanded ) < MAX_PATH )
+        lstrcpyn ( loc, expanded, MAX_PATH );
 
     *piIndex = PathParseIconLocation ( loc );
     lstrcpyn ( szIconFile, loc, cchMax );

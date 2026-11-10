@@ -9,8 +9,9 @@
 #pragma once
 #endif // _MSC_VER > 1000
 
-#define WINVER          0x0600
-#define _WIN32_WINNT    0x0600
+// Windows 10+ (ASSOCSTR_PROGID precisa de Windows 8 ou mais novo).
+#define WINVER          0x0A00
+#define _WIN32_WINNT    0x0A00
 #define _ATL_APARTMENT_THREADED
 
 // ATL

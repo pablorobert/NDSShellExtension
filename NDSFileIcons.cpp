@@ -339,8 +339,19 @@ static HRESULT RegisterImpl ( bool perUser )
 
     // Mantem os ProgIDs de registros anteriores: o ForceRemove do .rgs
     // apaga CLSID\{...}\Bindings, e sem isso um dono antigo do .nds
-    // ficaria com o handler pendurado depois do unregister.
-    ReadRecordedBindings ( bindings );
+    // ficaria com o handler pendurado depois do unregister. Os que nao
+    // passam mais no filtro (ex.: Applications\... gravado por uma versao
+    // antiga) sao desfeitos agora, senao sairiam da lista ainda ligados.
+    CBindings recorded;
+    ReadRecordedBindings ( recorded );
+    for ( int i = 0; i < recorded.count; i++ )
+        {
+        if ( 0 == lstrcmpi ( recorded.path[i], _T(".nds") )
+             || IsBindableProgId ( recorded.path[i], perUser ) )
+            bindings.Add ( recorded.path[i] );
+        else
+            Unbind ( recorded.path[i] );
+        }
 
     HRESULT hr = _Module.RegisterServer ( FALSE );
     if ( FAILED(hr) )
@@ -384,6 +395,10 @@ static HRESULT UnregisterImpl ( bool perUser )
 
     for ( int i = 0; i < bindings.count; i++ )
         Unbind ( bindings.path[i] );
+
+    // Bindings nao esta no .rgs: o registrar do ATL nao a apaga, o CLSID
+    // ficaria para tras e um registro futuro religaria ProgIDs antigos.
+    RegDeleteKey ( HKEY_CLASSES_ROOT, BINDINGS_KEY );
 
     return _Module.UnregisterServer ( FALSE );
 }
